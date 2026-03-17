@@ -1,0 +1,43 @@
+services:
+
+  db:
+    build:
+      context: ./db
+      dockerfile: Dockerfile
+    container_name: rsi21_db
+    restart: unless-stopped
+    volumes:
+      - db_data:/var/lib/mysql
+    networks:
+      - rsi21_net
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  webapp:
+    build:
+      context: ./app
+      dockerfile: Dockerfile
+    container_name: rsi21_webapp
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - rsi21_net
+    environment:
+      DB_HOST: db
+      DB_NAME: rsi21db
+      DB_USER: rsi21user
+      DB_PASS: rsi21pass
+
+volumes:
+  db_data:
+
+networks:
+  rsi21_net:
+    driver: bridge
