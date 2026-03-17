@@ -27,7 +27,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          fetch-depth: 2
+          fetch-depth: 2   # nécessaire pour git diff
 
       - name: Detect Dockerfile changes
         id: detect_changes
@@ -96,7 +96,6 @@ jobs:
         if: always()
         with:
           sarif_file: semgrep.sarif
-          category: semgrep
         continue-on-error: true
 
   # ─────────────────────────────────────────────
@@ -138,13 +137,11 @@ jobs:
           severity: "CRITICAL,HIGH"
           exit-code: "0"
 
-      # FIX : category unique par image pour éviter le conflit "only one run allowed per tool/category"
       - name: Upload Trivy SARIF — webapp
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: trivy-webapp.sarif
-          category: trivy-webapp
         continue-on-error: true
 
       - name: Upload Trivy SARIF — db
@@ -152,7 +149,6 @@ jobs:
         if: always()
         with:
           sarif_file: trivy-db.sarif
-          category: trivy-db
         continue-on-error: true
 
       - name: Trivy — rapport console webapp
@@ -233,25 +229,19 @@ jobs:
         run: |
           echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
 
-      # FIX : IMAGE_TAG et DOCKER_USERNAME passés explicitement en variables d'env
       - name: Deploy — docker-compose up (rebuild si Dockerfile modifié)
-        env:
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
         run: |
           if [ "${{ env.DOCKERFILE_CHANGED }}" = "true" ]; then
             echo "Dockerfile modifié → docker-compose up --build -d"
+            IMAGE_TAG=${{ env.IMAGE_TAG }} \
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} \
             docker-compose up --build -d
           else
             echo "Pas de modification Dockerfile → docker-compose up -d"
+            IMAGE_TAG=${{ env.IMAGE_TAG }} \
+            DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }} \
             docker-compose up -d
           fi
-
-      - name: Wait for stack to be ready
-        run: |
-          echo "Attente démarrage des services..."
-          sleep 15
-          docker-compose ps
 
       - name: Verify containers
         run: docker-compose ps
@@ -261,42 +251,20 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 6 : DAST — OWASP ZAP Baseline Scan
-  # FIX : la stack est redémarrée dans ce job car chaque job GitHub Actions
-  #       tourne sur un runner isolé (localhost du job deploy n'est pas accessible ici)
   # ─────────────────────────────────────────────
   dast-zap-baseline:
     runs-on: ubuntu-latest
-    needs: [build, push-dockerhub]
+    needs: [deploy]
     environment: testing
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-
-      - name: Docker Login
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # FIX : démarrage de la stack sur ce runner pour que localhost soit accessible par ZAP
-      - name: Start stack for DAST
-        env:
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: |
-          docker-compose up -d
-          echo "Stack démarrée, attente 20s..."
-          sleep 20
-
       - name: Wait for webapp to be ready
         run: |
           echo "Attente démarrage Apache..."
           for i in $(seq 1 15); do
-            if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -qE "^(200|301|302|500)"; then
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -qE "^(200|500)"; then
               echo "Webapp accessible"
               break
             fi
@@ -309,10 +277,10 @@ jobs:
         with:
           target: "http://localhost"
           rules_file_name: ".zap/rules.tsv"
-          cmd_options: "-I"
+          cmd_options: "-I"   # -I = ne pas échouer sur les alertes (à enlever en prod)
         continue-on-error: true
 
-      - name: Upload ZAP Baseline report
+      - name: Upload ZAP report
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -322,55 +290,23 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 7 : DAST — OWASP ZAP Full Scan
-  # FIX : stack redémarrée ici aussi (runner isolé)
-  #       + -J pour forcer la génération du fichier SARIF
   # ─────────────────────────────────────────────
   dast-zap-full:
     runs-on: ubuntu-latest
-    needs: [build, push-dockerhub, dast-zap-baseline]
+    needs: [dast-zap-baseline]
     environment: testing
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Install Docker Compose
-        run: |
-          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
-            -o /usr/local/bin/docker-compose
-          sudo chmod +x /usr/local/bin/docker-compose
-
-      - name: Docker Login
-        run: |
-          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
-
-      # FIX : démarrage de la stack sur ce runner isolé
-      - name: Start stack for DAST Full
-        env:
-          IMAGE_TAG: ${{ needs.build.outputs.image_tag }}
-          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
-        run: |
-          docker-compose up -d
-          echo "Stack démarrée, attente 20s..."
-          sleep 20
-
-      - name: Wait for webapp to be ready
-        run: |
-          for i in $(seq 1 15); do
-            if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -qE "^(200|301|302|500)"; then
-              echo "Webapp accessible"; break
-            fi
-            echo "Tentative $i/15..."; sleep 5
-          done
-
-      # FIX : -J report_sarif.json force la génération du fichier SARIF attendu
       - name: OWASP ZAP — Full Scan
         uses: zaproxy/action-full-scan@v0.10.0
         with:
           target: "http://localhost"
-          cmd_options: "-I -J report_sarif.json"
+          cmd_options: "-I"
         continue-on-error: true
 
-      - name: Upload ZAP Full Scan report HTML
+      - name: Upload ZAP Full Scan report
         uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -378,11 +314,9 @@ jobs:
           path: report_html.html
           retention-days: 7
 
-      # FIX : category unique pour éviter conflit si d'autres SARIF sont uploadés
       - name: Upload ZAP SARIF to GitHub Security
         uses: github/codeql-action/upload-sarif@v3
         if: always()
         with:
           sarif_file: report_sarif.json
-          category: zap-full
         continue-on-error: true
