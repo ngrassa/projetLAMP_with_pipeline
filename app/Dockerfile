@@ -1,6 +1,6 @@
 FROM debian:stable-slim
 LABEL version="1.0"
-LABEL owner="RSI21"
+LABEL owner="GRASSA Nordine"
 
 RUN apt-get update && \
     apt-get install -y apache2 php php-mysql && \
