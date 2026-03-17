@@ -1,0 +1,22 @@
+# Revenir à la racine du projet
+cd ~/projetLAMP
+
+# Vérifier que le docker-compose.yml est bien là
+ls docker-compose.yml
+
+# Puis tester avec les variables nécessaires
+IMAGE_TAG=local DOCKER_USERNAME=grassa77 docker-compose up -d
+
+# Vérifier
+docker-compose ps
+-------------------------------------------------
+#ou bien creer un fichier .env: 
+cd ~/projetLAMP
+cat > .env << EOF
+IMAGE_TAG=local
+DOCKER_USERNAME=grassa77
+EOF
+
+
+docker-compose up -d
+docker-compose ps
