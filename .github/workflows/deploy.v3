@@ -17,6 +17,7 @@ jobs:
   # ─────────────────────────────────────────────
   # JOB 1 : BUILD
   # Rebuild uniquement si app/ ou db/ ont été modifiés.
+  # Sinon, on réutilise le dernier tag publié sur DockerHub.
   # ─────────────────────────────────────────────
   build:
     runs-on: ubuntu-latest
@@ -30,6 +31,7 @@ jobs:
         with:
           fetch-depth: 2
 
+      # ── Détection des changements pertinents ──
       - name: Detect changes in app/ and db/
         id: detect_changes
         run: |
@@ -39,12 +41,13 @@ jobs:
 
           if echo "$CHANGED" | grep -qE '^(app/|db/)'; then
             echo "rebuild=true" >> $GITHUB_OUTPUT
-            echo "➜ Modifications détectées dans app/ ou db/ → pipeline complet activé"
+            echo "➜ Modifications détectées dans app/ ou db/ → rebuild activé"
           else
             echo "rebuild=false" >> $GITHUB_OUTPUT
-            echo "➜ Aucune modification dans app/ ou db/ → pipeline ignoré"
+            echo "➜ Aucune modification dans app/ ou db/ → rebuild ignoré"
           fi
 
+      # ── Si rebuild : on utilise le SHA court comme tag ──
       - name: Set tag (rebuild)
         if: steps.detect_changes.outputs.rebuild == 'true'
         id: set_new_tag
@@ -54,15 +57,28 @@ jobs:
           echo "IMAGE_TAG=$SHORT_SHA" >> $GITHUB_ENV
           echo "Nouveau tag : $SHORT_SHA"
 
+      # ── Si pas de rebuild : on récupère le dernier tag publié sur DockerHub ──
+      - name: Get latest tag from DockerHub (no rebuild)
+        if: steps.detect_changes.outputs.rebuild == 'false'
+        id: get_latest_tag
+        run: |
+          LATEST=$(curl -s "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/projetlamp-webapp/tags/?page_size=1&ordering=last_updated" \
+            | python3 -c "import sys,json; tags=json.load(sys.stdin)['results']; print(tags[0]['name']) if tags else print('latest')")
+          echo "image_tag=$LATEST" >> $GITHUB_OUTPUT
+          echo "IMAGE_TAG=$LATEST" >> $GITHUB_ENV
+          echo "Tag réutilisé depuis DockerHub : $LATEST"
+
+      # ── Consolidation du tag final dans un seul output ──
       - name: Resolve final image tag
         id: resolve_tag
         run: |
           if [ "${{ steps.detect_changes.outputs.rebuild }}" = "true" ]; then
             echo "image_tag=${{ steps.set_new_tag.outputs.image_tag }}" >> $GITHUB_OUTPUT
           else
-            echo "image_tag=skipped" >> $GITHUB_OUTPUT
+            echo "image_tag=${{ steps.get_latest_tag.outputs.image_tag }}" >> $GITHUB_OUTPUT
           fi
 
+      # ── Build Docker images (uniquement si rebuild) ──
       - name: Build Docker images
         if: steps.detect_changes.outputs.rebuild == 'true'
         run: |
@@ -85,16 +101,17 @@ jobs:
             db.tar
           retention-days: 1
 
-      - name: Skip summary
+      - name: Skip build summary
         if: steps.detect_changes.outputs.rebuild == 'false'
         run: |
-          echo "══════════════════════════════════════════════════"
-          echo "  Aucun changement dans app/ ou db/"
-          echo "  Build / SAST / Push / Deploy / DAST → SKIPPÉS"
-          echo "══════════════════════════════════════════════════"
+          echo "══════════════════════════════════════════"
+          echo "  Aucun rebuild nécessaire."
+          echo "  Image réutilisée : ${{ steps.get_latest_tag.outputs.image_tag }}"
+          echo "══════════════════════════════════════════"
 
   # ─────────────────────────────────────────────
   # JOB 2 : SAST — Analyse statique du code source
+  # Ignoré si pas de rebuild (code source inchangé)
   # ─────────────────────────────────────────────
   sast-code:
     runs-on: ubuntu-latest
@@ -128,6 +145,7 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 3 : SAST — Scan des images Docker (CVE)
+  # Ignoré si pas de rebuild (images inchangées)
   # ─────────────────────────────────────────────
   sast-image:
     runs-on: ubuntu-latest
@@ -200,6 +218,7 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 4 : PUSH vers DockerHub
+  # Ignoré si pas de rebuild (rien de nouveau à pousser)
   # ─────────────────────────────────────────────
   push-dockerhub:
     runs-on: ubuntu-latest
@@ -236,12 +255,13 @@ jobs:
           echo "db     → ${{ secrets.DOCKER_USERNAME }}/projetlamp-db:${{ env.IMAGE_TAG }}"
 
   # ─────────────────────────────────────────────
-  # JOB 5 : DEPLOY
+  # JOB 5 : DEPLOY — toujours exécuté
+  # Redéploie avec le tag résolu (nouveau ou réutilisé)
   # ─────────────────────────────────────────────
   deploy:
     runs-on: ubuntu-latest
     needs: [build, push-dockerhub]
-    if: needs.build.outputs.rebuild == 'true'
+    if: always() && needs.build.result == 'success'
     environment: testing
     steps:
       - name: Checkout repository
@@ -279,7 +299,7 @@ jobs:
   dast-zap-baseline:
     runs-on: ubuntu-latest
     needs: [build, push-dockerhub]
-    if: needs.build.outputs.rebuild == 'true'
+    if: always() && needs.build.result == 'success'
     environment: testing
     steps:
       - name: Checkout repository
@@ -339,7 +359,7 @@ jobs:
   dast-zap-full:
     runs-on: ubuntu-latest
     needs: [build, push-dockerhub, dast-zap-baseline]
-    if: needs.build.outputs.rebuild == 'true'
+    if: always() && needs.build.result == 'success'
     environment: testing
     steps:
       - name: Checkout repository
