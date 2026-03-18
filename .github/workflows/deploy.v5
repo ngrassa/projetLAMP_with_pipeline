@@ -12,7 +12,6 @@ permissions:
   contents: write
   security-events: write
   issues: write
-
 jobs:
 
   # ─────────────────────────────────────────────
@@ -31,21 +30,10 @@ jobs:
         with:
           fetch-depth: 2
 
-      # FIX : utilisation de github.event.before/after au lieu de HEAD~1
       - name: Detect changes in app/ and db/
         id: detect_changes
         run: |
-          BEFORE="${{ github.event.before }}"
-          AFTER="${{ github.event.after }}"
-
-          # Premier commit : before = 000...0 → rebuild forcé
-          if [ "$BEFORE" = "0000000000000000000000000000000000000000" ]; then
-            echo "rebuild=true" >> $GITHUB_OUTPUT
-            echo "➜ Premier commit → rebuild forcé"
-            exit 0
-          fi
-
-          CHANGED=$(git diff --name-only $BEFORE $AFTER)
+          CHANGED=$(git diff --name-only HEAD~1 HEAD)
           echo "Fichiers modifiés :"
           echo "$CHANGED"
 
@@ -348,7 +336,9 @@ jobs:
 
   # ─────────────────────────────────────────────
   # JOB 7 : DAST — OWASP ZAP Full Scan
+  # FIX : suppression de -J, conversion JSON→SARIF via Python
   # ─────────────────────────────────────────────
+ 
   dast-zap-full:
     runs-on: ubuntu-latest
     needs: [build, push-dockerhub, dast-zap-baseline]
@@ -395,6 +385,7 @@ jobs:
           artifact_name: "zap-full-scan"
         continue-on-error: true
 
+      # Rapports disponibles en téléchargement depuis l'onglet Actions
       - name: Upload ZAP Full Scan report HTML
         uses: actions/upload-artifact@v4
         if: always()
@@ -410,3 +401,4 @@ jobs:
           name: zap-full-report-json
           path: report_json.json
           retention-days: 7
+
