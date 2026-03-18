@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
   security-events: write
-
+  issues: write
 jobs:
 
   # ─────────────────────────────────────────────
