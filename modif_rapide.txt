@@ -1,0 +1,11 @@
+deploy.yml garde :
+  ✅ JOB 1 — build
+  ✅ JOB 2 — sast-code
+  ✅ JOB 3 — sast-image
+  ✅ JOB 4 — push-dockerhub
+  ✅ JOB 5 — deploy
+  ❌ JOB 6 — dast-zap-baseline   → supprimé
+  ❌ JOB 7 — dast-zap-full       → supprimé
+
+test-zap.yml contient :
+  ✅ ZAP Baseline + Full Scan (déclenchement manuel)

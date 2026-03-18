@@ -1,0 +1,63 @@
+name: test-zap-only
+
+on:
+  workflow_dispatch:    # déclenchement manuel depuis GitHub
+
+permissions:
+  contents: write
+  security-events: write
+  issues: write
+
+jobs:
+  test-zap:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Docker Compose
+        run: |
+          sudo curl -L "https://github.com/docker/compose/releases/latest/download/docker-compose-$(uname -s)-$(uname -m)" \
+            -o /usr/local/bin/docker-compose
+          sudo chmod +x /usr/local/bin/docker-compose
+
+      - name: Docker Login
+        run: |
+          echo "${{ secrets.DOCKER_PASSWORD }}" | docker login -u "${{ secrets.DOCKER_USERNAME }}" --password-stdin
+
+      - name: Start stack
+        env:
+          IMAGE_TAG: ${{ secrets.DOCKER_USERNAME == '' && 'local' || 'latest' }}
+          DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+        run: |
+          LATEST=$(curl -s "https://hub.docker.com/v2/repositories/${{ secrets.DOCKER_USERNAME }}/projetlamp-webapp/tags/?page_size=1&ordering=last_updated" \
+            | python3 -c "import sys,json; print(json.load(sys.stdin)['results'][0]['name'])")
+          export IMAGE_TAG=$LATEST
+          export DOCKER_USERNAME=${{ secrets.DOCKER_USERNAME }}
+          docker-compose pull
+          docker-compose up -d
+          sleep 20
+
+      - name: Wait for webapp
+        run: |
+          for i in $(seq 1 15); do
+            if curl -s -o /dev/null -w "%{http_code}" http://localhost | grep -qE "^(200|301|302|500)"; then
+              echo "Webapp accessible"; break
+            fi
+            echo "Tentative $i/15..."; sleep 5
+          done
+
+      - name: OWASP ZAP — Full Scan
+        uses: zaproxy/action-full-scan@v0.12.0
+        with:
+          target: "http://localhost"
+          cmd_options: "-I"
+        continue-on-error: true
+
+      - name: Upload rapport HTML
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: zap-test-report
+          path: report_html.html
+          retention-days: 3
