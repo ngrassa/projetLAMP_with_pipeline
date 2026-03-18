@@ -23,7 +23,7 @@ if ($result->num_rows > 0) {
         echo "<hr>";
     }
 } else {
-    echo "Aucun article trouvé";
+    echo "Aucun titre trouvé";
 }
 
 $conn->close();

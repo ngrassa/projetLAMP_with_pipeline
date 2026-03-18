@@ -323,6 +323,7 @@ jobs:
           target: "http://localhost"
           rules_file_name: ".zap/rules.tsv"
           cmd_options: "-I"
+          artifact_name: "zap-baseline-scan"
         continue-on-error: true
 
       - name: Upload ZAP Baseline report
@@ -381,6 +382,7 @@ jobs:
         with:
           target: "http://localhost"
           cmd_options: "-I"
+          artifact_name: "zap-full-scan"
         continue-on-error: true
 
       # Rapports disponibles en téléchargement depuis l'onglet Actions
