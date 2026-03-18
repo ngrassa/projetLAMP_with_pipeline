@@ -1,7 +1,7 @@
 FROM mariadb:11
 
 LABEL version="1.0"
-LABEL owner="RSI21"
+LABEL owner="GRASSA Noureddine"
 
 ENV MARIADB_ROOT_PASSWORD=rootpassword
 ENV MARIADB_DATABASE=rsi21db
