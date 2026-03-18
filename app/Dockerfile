@@ -1,5 +1,5 @@
 FROM debian:stable-slim
-LABEL version="1.0"
+LABEL version="2.0"
 LABEL owner="GRASSA Nordine"
 
 RUN apt-get update && \
