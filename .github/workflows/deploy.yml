@@ -248,7 +248,7 @@ jobs:
           echo "db     → ${{ secrets.DOCKER_USERNAME }}/projetlamp-db:${{ env.IMAGE_TAG }}"
 
   # ─────────────────────────────────────────────
-  # JOB 5 : DEPLOY
+  # JOB 5 : DEPLOY : lancer docker compose up -d
   # ─────────────────────────────────────────────
   deploy:
     runs-on: ubuntu-latest
